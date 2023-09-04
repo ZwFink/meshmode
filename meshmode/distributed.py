@@ -75,11 +75,7 @@ logger = logging.getLogger(__name__)
 
 @contextmanager
 def _duplicate_mpi_comm(mpi_comm):
-    dup_comm = mpi_comm.Dup()
-    try:
-        yield dup_comm
-    finally:
-        dup_comm.Free()
+    yield mpi_comm
 
 
 def mpi_distribute(
@@ -117,21 +113,22 @@ def mpi_distribute(
             for dest_rank, data in source_data.items():
                 if dest_rank == rank:
                     local_data = data
-                    logger.info("rank %d: received data", rank)
+                    print("rank %d: received data", rank)
                 else:
                     reqs.append(mpi_comm.isend(data, dest=dest_rank))
 
-            logger.info("rank %d: sent all data", rank)
+            print("rank %d: sent all data", rank)
 
-            from mpi4py import MPI
-            MPI.Request.waitall(reqs)
+            #from mpi4py import MPI
+            import commi
+            commi.request.Waitall(reqs)
 
         else:
             receiving = mpi_comm.scatter([], root=source_rank)
 
             if receiving:
                 local_data = mpi_comm.recv(source=source_rank)
-                logger.info("rank %d: received data", rank)
+                print("rank %d: received data", rank)
 
         return local_data
 
@@ -323,7 +320,7 @@ class MPIBoundaryCommSetupHelper:
     def __enter__(self):
         self._internal_mpi_comm = self.mpi_comm.Dup()
 
-        logger.info("bdry comm rank %d comm begin", self.i_local_rank)
+        print("bdry comm rank %d comm begin", self.i_local_rank)
 
         # Not using irecv because mpi4py only allocates 32KB per receive buffer
         # when receiving pickled objects. We could pass buffers to irecv explicitly,
@@ -367,11 +364,13 @@ class MPIBoundaryCommSetupHelper:
             # Already completed, nothing more to do
             return {}
 
-        status = MPI.Status()
+        import commi
+        status = commi.Status()
 
         # Wait for any receive
         data = [self._internal_mpi_comm.recv(status=status)]
         source_ranks = [status.source]
+        print(f"Rank {self._internal_mpi_comm.Get_rank()} received from {source_ranks[0]}")
 
         # Complete any other available receives while we're at it
         while self._internal_mpi_comm.iprobe():
@@ -391,7 +390,7 @@ class MPIBoundaryCommSetupHelper:
             (remote_part_id, local_part_id,
                     remote_bdry_mesh, remote_group_infos) = recvd
 
-            logger.debug("rank %d: Received part id '%s' data from rank %d",
+            print("rank %d: Received part id '%s' data from rank %d",
                          self.i_local_rank, remote_part_id, i_src_rank)
 
             # Connect local_mesh to remote_mesh
@@ -417,8 +416,8 @@ class MPIBoundaryCommSetupHelper:
             self.pending_recv_identifiers.remove((local_part_id, remote_part_id))
 
         if not self.pending_recv_identifiers:
-            MPI.Request.waitall(self.send_reqs)
-            logger.info("bdry comm rank %d comm end", self.i_local_rank)
+            commi.request.Waitall(self.send_reqs)
+            print("bdry comm rank %d comm end", self.i_local_rank)
 
         return remote_to_local_bdry_conns
 
