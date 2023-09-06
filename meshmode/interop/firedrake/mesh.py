@@ -20,11 +20,11 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 """
 
-from warnings import warn  # noqa
+from warnings import warn
 import logging
 import numpy as np
 
-from modepy import resampling_matrix, simplex_best_available_basis
+from modepy import resampling_matrix, basis_for_space, PN, Simplex
 
 from meshmode.mesh import (
     BTAG_ALL,
@@ -199,6 +199,25 @@ def _get_firedrake_boundary_tags(fdrake_mesh, tag_induced_boundary=False):
     return bdy_tags
 
 
+def _get_facet_markers(dm, facets):
+    # based on code removed in
+    # https://github.com/firedrakeproject/firedrake/commit/9125a65c0cb5bb671c62c33f05a0d42b983e06ed
+    import firedrake.cython.dmcommon as dmcommon
+
+    ids = np.empty_like(facets)
+    ids.fill(-1)
+
+    nfacet = facets.shape[0]
+    label = dm.getLabel(dmcommon.FACE_SETS_LABEL)
+    if not label:
+        return
+
+    for f in range(nfacet):
+        ids[f] = label.getValue(facets[f])
+
+    return ids
+
+
 def _get_firedrake_facial_adjacency_groups(fdrake_mesh_topology,
                                            cells_to_use=None):
     """
@@ -333,7 +352,10 @@ def _get_firedrake_facial_adjacency_groups(fdrake_mesh_topology,
                                   dtype=Mesh.face_id_dtype)
     # If only using some of the cells, throw away unused cells and
     # move to new cell index
-    ext_facet_markers = top.exterior_facets.markers
+
+    ext_facet_markers = _get_facet_markers(
+            top.topology_dm, top.exterior_facets.facets)
+
     if cells_to_use is not None:
         to_keep = np.isin(ext_elements, cells_to_use)
         ext_elements = np.vectorize(cells_to_use_inv.__getitem__)(
@@ -853,7 +875,7 @@ def export_mesh_to_firedrake(mesh, group_nr=None, comm=None):
 
         import firedrake.mesh as fd_mesh
         with _PyOp2CommDuplicator(comm) as comm:
-            plex = fd_mesh._from_cell_list(group.dim, cells, coords, comm)
+            plex = fd_mesh.plex_from_cell_list(group.dim, cells, coords, comm)
 
         # Nb : One might be tempted to pass reorder=False and thereby save some
         #      hassle in exchange for forcing firedrake to have slightly
@@ -927,8 +949,8 @@ def export_mesh_to_firedrake(mesh, group_nr=None, comm=None):
     fd_unit_nodes = get_finat_element_unit_nodes(coords_fspace.finat_element)
     fd_unit_nodes = fd_ref_cell_to_mm(fd_unit_nodes)
 
-    basis = simplex_best_available_basis(group.dim, group.order)
-    resampling_mat = resampling_matrix(basis,
+    basis = basis_for_space(PN(group.dim, group.order), Simplex(group.dim))
+    resampling_mat = resampling_matrix(basis.functions,
                                        new_nodes=fd_unit_nodes,
                                        old_nodes=group.unit_nodes)
     # Store the meshmode data resampled to firedrake unit nodes

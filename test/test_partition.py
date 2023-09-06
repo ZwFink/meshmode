@@ -49,7 +49,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Is there a smart way of choosing this number?
-# Currenly it is the same as the base from MPIBoundaryCommSetupHelper
+# Currently it is the same as the base from MPIBoundaryCommSetupHelper
 TAG_BASE = 83411
 TAG_SEND_REMOTE_NODES = TAG_BASE + 3
 TAG_SEND_LOCAL_NODES = TAG_BASE + 4
@@ -333,12 +333,12 @@ def test_partition_mesh(mesh_size, num_parts, num_groups, dim, scramble_parts):
                         for idx in range(len(adj.elements)):
                             if (p_elem == adj.elements[idx]
                                      and face == adj.element_faces[idx]):
-                                assert p_n_elem == adj.neighbors[idx],\
+                                assert p_n_elem == adj.neighbors[idx], \
                                         "Tag does not give correct neighbor"
-                                assert n_face == adj.neighbor_faces[idx],\
+                                assert n_face == adj.neighbor_faces[idx], \
                                         "Tag does not give correct neighbor"
 
-    assert ipagrp_count > 0 or not has_cross_rank_adj,\
+    assert ipagrp_count > 0 or not has_cross_rank_adj, \
         "expected at least one InterPartAdjacencyGroup"
 
     for i_remote_part in range(num_parts):
@@ -347,7 +347,7 @@ def test_partition_mesh(mesh_size, num_parts, num_groups, dim, scramble_parts):
             if (i_local_part, i_remote_part) in connected_parts:
                 tag_sum += count_tags(
                     part_meshes[i_local_part], BTAG_PARTITION(i_remote_part))
-        assert num_tags[i_remote_part] == tag_sum,\
+        assert num_tags[i_remote_part] == tag_sum, \
                 "part_mesh has the wrong number of BTAG_PARTITION boundaries"
 
 
@@ -368,16 +368,14 @@ def count_tags(mesh, tag):
 # {{{ MPI test boundary swap
 
 def _test_mpi_boundary_swap(dim, order, num_groups):
-    from meshmode.distributed import MPIMeshDistributor, MPIBoundaryCommSetupHelper
+    from meshmode.distributed import (MPIBoundaryCommSetupHelper,
+                                      membership_list_to_map)
+    from meshmode.mesh.processing import partition_mesh
 
     from mpi4py import MPI
     mpi_comm = MPI.COMM_WORLD
-    i_local_part = mpi_comm.Get_rank()
-    num_parts = mpi_comm.Get_size()
 
-    mesh_dist = MPIMeshDistributor(mpi_comm)
-
-    if mesh_dist.is_mananger_rank():
+    if mpi_comm.rank == 0:
         np.random.seed(42)
         from meshmode.mesh.generation import generate_warped_rect_mesh
         meshes = [generate_warped_rect_mesh(dim, order=order, nelements_side=4)
@@ -389,11 +387,14 @@ def _test_mpi_boundary_swap(dim, order, num_groups):
         else:
             mesh = meshes[0]
 
-        part_per_element = np.random.randint(num_parts, size=mesh.nelements)
+        part_id_to_part = partition_mesh(mesh,
+                       membership_list_to_map(
+                           np.random.randint(mpi_comm.size, size=mesh.nelements)))
+        parts = [part_id_to_part[i] for i in range(mpi_comm.size)]
 
-        local_mesh = mesh_dist.send_mesh_parts(mesh, part_per_element, num_parts)
+        local_mesh = mpi_comm.scatter(parts)
     else:
-        local_mesh = mesh_dist.receive_mesh_part()
+        local_mesh = mpi_comm.scatter(None)
 
     group_factory = default_simplex_group_factory(base_dim=dim, order=order)
 
@@ -436,14 +437,13 @@ def _test_mpi_boundary_swap(dim, order, num_groups):
                         remote_to_local_bdry_conns,
                         connected_parts)
 
-    logger.debug("Rank %d exiting", i_local_part)
+    logger.debug("Rank %d exiting", mpi_comm.rank)
 
 
 def _test_connected_parts(mpi_comm, connected_parts):
     num_parts = mpi_comm.Get_size()
-    i_local_part = mpi_comm.Get_rank()
 
-    assert i_local_part not in connected_parts
+    assert mpi_comm.rank not in connected_parts
 
     # Get the full adjacency
     connected_mask = np.empty(num_parts, dtype=bool)
@@ -456,7 +456,7 @@ def _test_connected_parts(mpi_comm, connected_parts):
     # make sure it agrees with connected_parts
     parts_connected_to_me = set()
     for i_remote_part in range(num_parts):
-        if all_connected_masks[i_remote_part][i_local_part]:
+        if all_connected_masks[i_remote_part][mpi_comm.rank]:
             parts_connected_to_me.add(i_remote_part)
     assert parts_connected_to_me == connected_parts
 

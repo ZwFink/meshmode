@@ -545,7 +545,7 @@ def _alias_global_temporaries(t_unit):
          for tv in kernel.temporary_variables.values()}.values())
 
     logger.info(
-        "[_alias_global_temporaries]: Reduced memory requirement from "
+        f"[_alias_global_temporaries]: Reduced memory requirement of '{kernel.name}' from "
         f"{old_tmp_mem_requirement*1e-6:.1f}MB to"
         f" {new_tmp_mem_requirement*1e-6:.1f}MB.")
 
@@ -1246,7 +1246,8 @@ class FusionContractorArrayContext(
                 except StopIteration:
                     return expr
                 else:
-                    assert isinstance(expr, pt.InputArgumentBase)
+                    # See https://github.com/inducer/arraycontext/pull/229
+                    # assert isinstance(expr, pt.InputArgumentBase)
                     return expr.without_tags(fem_ensm_tag)
             else:
                 return expr
@@ -1613,7 +1614,7 @@ class FusionContractorArrayContext(
 
         knl = t_unit.default_entrypoint
 
-        logger.info(f"Transforming kernel with {len(knl.instructions)} statements.")
+        logger.info(f"Transforming kernel '{knl.name}' with {len(knl.instructions)} statements.")
 
         # {{{ fallback: if the inames are not inferred which mesh entity they
         # iterate over.
